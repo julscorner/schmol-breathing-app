@@ -289,13 +289,13 @@ const App = () => {
     }
     // Si prefers-reduced-motion, pas de pulsation
     if (prefersReducedMotion) {
-      return { radius: 55, opacity: 0.75 };
+      return { radius: 55, opacity: 0.65 };
     }
     // Animation plus fluide avec courbe sinusoïdale douce
     const pulse = 0.5 + Math.sin(idlePulse) * 0.12;
     return {
       radius: 30 + pulse * 50,
-      opacity: 0.65 + Math.sin(idlePulse) * 0.1
+      opacity: 0.55 + Math.sin(idlePulse) * 0.12
     };
   };
 
@@ -538,33 +538,32 @@ const App = () => {
             aria-label="Start breathing session"
           >
             <svg 
-              width="280" 
-              height="280" 
-              viewBox="0 0 280 280" 
-              className="transition-transform hover:scale-105"
+              viewBox="0 0 350 350" 
+              className="w-[85vw] max-w-[350px] h-auto transition-transform hover:scale-105"
               role="img"
               aria-label="Breathing circle animation"
+              style={{ overflow: 'visible' }}
             >
               {/* Halo externe - suit le cercle */}
               {!prefersReducedMotion && (
                 <circle
-                  cx="140"
-                  cy="140"
+                  cx="175"
+                  cy="175"
                   r={(25 + idleCircle.radius) * 1.8}
                   fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.15})`}
                 />
               )}
               {/* Halo moyen */}
               <circle
-                cx="140"
-                cy="140"
+                cx="175"
+                cy="175"
                 r={idleCircle.radius * 1.5}
                 fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.2})`}
               />
               {/* Cercle guide */}
               <circle
-                cx="140"
-                cy="140"
+                cx="175"
+                cy="175"
                 r="80"
                 fill="none"
                 stroke="#fdba74"
@@ -573,8 +572,8 @@ const App = () => {
               />
               {/* Cercle principal */}
               <circle
-                cx="140"
-                cy="140"
+                cx="175"
+                cy="175"
                 r={25 + idleCircle.radius}
                 fill="#fb923c"
                 opacity={idleCircle.opacity}

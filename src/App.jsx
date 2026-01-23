@@ -289,13 +289,13 @@ const App = () => {
     }
     // Si prefers-reduced-motion, pas de pulsation
     if (prefersReducedMotion) {
-      return { radius: 55, opacity: 0.5 };
+      return { radius: 55, opacity: 0.75 };
     }
     // Animation plus fluide avec courbe sinusoïdale douce
     const pulse = 0.5 + Math.sin(idlePulse) * 0.12;
     return {
       radius: 30 + pulse * 50,
-      opacity: 0.45 + Math.sin(idlePulse) * 0.12
+      opacity: 0.65 + Math.sin(idlePulse) * 0.1
     };
   };
 
@@ -479,18 +479,7 @@ const App = () => {
       )}
       
       {!isStarted && !showEndScreen && !prefersReducedMotion && (
-        <div 
-          className="absolute left-1/2 -translate-x-1/2 rounded-full"
-          style={{
-            top: '30%',
-            width: `${(getIdleCircleProps().radius + 25) * 3}px`,
-            height: `${(getIdleCircleProps().radius + 25) * 3}px`,
-            background: `radial-gradient(circle, 
-              rgba(251, 146, 60, ${getIdleCircleProps().opacity * 0.2}) 0%, 
-              rgba(251, 146, 60, 0) 70%)`,
-            transform: 'translate(-50%, -50%)'
-          }}
-        />
+        <></>
       )}
     </div>
   );
@@ -540,7 +529,7 @@ const App = () => {
       <div className="min-h-screen bg-slate-900 relative overflow-y-auto">
         <BackgroundEffects />
         
-        <div className="min-h-screen flex flex-col lg:flex-row items-center justify-center p-4 gap-12 lg:gap-12 relative z-10">
+        <div className="min-h-screen flex flex-col lg:flex-row items-center justify-center p-4 lg:px-16 xl:px-24 gap-12 lg:gap-12 relative z-10">
           
           {/* Cercle cliquable - accessible au clavier */}
           <button 
@@ -556,12 +545,23 @@ const App = () => {
               role="img"
               aria-label="Breathing circle animation"
             >
+              {/* Halo externe - suit le cercle */}
+              {!prefersReducedMotion && (
+                <circle
+                  cx="140"
+                  cy="140"
+                  r={(25 + idleCircle.radius) * 1.8}
+                  fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.15})`}
+                />
+              )}
+              {/* Halo moyen */}
               <circle
                 cx="140"
                 cy="140"
                 r={idleCircle.radius * 1.5}
                 fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.2})`}
               />
+              {/* Cercle guide */}
               <circle
                 cx="140"
                 cy="140"
@@ -571,6 +571,7 @@ const App = () => {
                 strokeWidth="1"
                 opacity="0.2"
               />
+              {/* Cercle principal */}
               <circle
                 cx="140"
                 cy="140"

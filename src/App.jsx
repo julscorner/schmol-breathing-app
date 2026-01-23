@@ -549,16 +549,16 @@ const App = () => {
                 <circle
                   cx="175"
                   cy="175"
-                  r={(25 + idleCircle.radius) * 1.8}
-                  fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.15})`}
+                  r={(25 + idleCircle.radius) * 1.3}
+                  fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.12})`}
                 />
               )}
               {/* Halo moyen */}
               <circle
                 cx="175"
                 cy="175"
-                r={idleCircle.radius * 1.5}
-                fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.2})`}
+                r={idleCircle.radius * 1.2}
+                fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.18})`}
               />
               {/* Cercle guide */}
               <circle

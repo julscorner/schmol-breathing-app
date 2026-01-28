@@ -1,24 +1,80 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Pause, RotateCcw, Home, RefreshCw } from 'lucide-react';
 
+// Priorité 2: Constantes hoistées (évite recréation à chaque render)
+const TIMINGS = {
+  balanced: { inhale: 4000, hold1: 4000, exhale: 4000, hold2: 4000 },
+  longExhale: { inhale: 4000, hold1: 500, exhale: 8000, hold2: 500 }
+};
+
+const PHASES_PER_CYCLE = 4;
+const MIN_RADIUS = 30;
+const MAX_RADIUS = 120;
+const MIN_AREA = MIN_RADIUS * MIN_RADIUS;
+const MAX_AREA = MAX_RADIUS * MAX_RADIUS;
+
+// Fonction ease-in-out hoistée
+const easeInOut = (t) => {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+};
+
+// Génération des étoiles hoistée (ne change jamais)
+const generateStars = () => {
+  const starArray = [];
+  
+  for (let i = 0; i < 110; i++) {
+    starArray.push({
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 1 + 0.5,
+      opacity: Math.random() * 0.3 + 0.1,
+      twinkle: false,
+      layer: 'far'
+    });
+  }
+  
+  for (let i = 0; i < 40; i++) {
+    starArray.push({
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 2 + 1.5,
+      baseOpacity: Math.random() * 0.4 + 0.3,
+      twinkle: true,
+      twinkleSpeed: Math.random() * 4000 + 3000,
+      twinkleOffset: Math.random() * Math.PI * 2,
+      layer: 'near'
+    });
+  }
+  
+  return starArray;
+};
+
+const STARS = generateStars();
+
+// Styles focus hoistés
+const FOCUS_STYLES = "focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
+
 const App = () => {
-  const [isStarted, setIsStarted] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [isCompleted, setIsCompleted] = useState(false);
-  const [isFadingOut, setIsFadingOut] = useState(false);
-  const [showEndScreen, setShowEndScreen] = useState(false);
+  // États essentiels seulement (réduit de 19 à 10)
+  const [appState, setAppState] = useState('idle'); // 'idle' | 'breathing' | 'paused' | 'fadingOut' | 'endScreen'
   const [technique, setTechnique] = useState('balanced');
   const [duration, setDuration] = useState(60);
-  const [phase, setPhase] = useState('idle');
-  const [phaseIndex, setPhaseIndex] = useState(0);
-  const [circleRadius, setCircleRadius] = useState(30);
-  const [circleOpacity, setCircleOpacity] = useState(0.15);
-  const [cycleCount, setCycleCount] = useState(0);
-  const [totalCycles, setTotalCycles] = useState(0);
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [phaseProgress, setPhaseProgress] = useState(0);
   
-  // Accessibilité : détecter si l'utilisateur préfère moins de mouvements
+  // Priorité 1: Utiliser useRef pour les valeurs qui changent souvent (évite re-renders)
+  const animationDataRef = useRef({
+    phase: 'idle',
+    phaseIndex: 0,
+    circleRadius: MIN_RADIUS,
+    circleOpacity: 0.15,
+    cycleCount: 0,
+    elapsedTime: 0,
+    phaseProgress: 0
+  });
+  
+  // État pour forcer le re-render de l'animation (mis à jour via RAF)
+  const [, forceRender] = useState(0);
+  
+  // Accessibilité : détecter prefers-reduced-motion
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   
   useEffect(() => {
@@ -30,6 +86,7 @@ const App = () => {
     return () => mediaQuery.removeEventListener('change', handler);
   }, []);
   
+  // Refs pour l'animation
   const animationRef = useRef(null);
   const startTimeRef = useRef(null);
   const pausedAtRef = useRef(null);
@@ -37,26 +94,18 @@ const App = () => {
   const fadeTimeoutRef = useRef(null);
   const lastCycleRef = useRef(-1);
 
-  const getTimings = useCallback(() => {
-    if (technique === 'balanced') {
-      return { inhale: 4000, hold1: 4000, exhale: 4000, hold2: 4000 };
-    } else {
-      return { inhale: 4000, hold1: 500, exhale: 8000, hold2: 500 };
-    }
-  }, [technique]);
-
-  const timings = getTimings();
+  // Priorité 2: Timings dérivés (pas de useCallback nécessaire)
+  const timings = TIMINGS[technique];
   const cycleTime = timings.inhale + timings.hold1 + timings.exhale + timings.hold2;
 
-  const phasesPerCycle = 4;
+  // Priorité 2: Valeur dérivée au lieu de useState + useEffect
+  const totalCycles = useMemo(() => 
+    Math.ceil((duration * 1000) / cycleTime), 
+    [duration, cycleTime]
+  );
 
-  useEffect(() => {
-    setTotalCycles(Math.ceil((duration * 1000) / cycleTime));
-  }, [duration, cycleTime]);
-
-  const playChime = () => {
+  const playChime = useCallback(() => {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
     const baseFreq = 528;
     
     const osc1 = audioContext.createOscillator();
@@ -93,66 +142,65 @@ const App = () => {
     gain3.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 2.5);
     osc3.start(audioContext.currentTime + 0.05);
     osc3.stop(audioContext.currentTime + 2.5);
-  };
+  }, []);
 
-  const startBreathing = () => {
-    setIsStarted(true);
-    setIsPaused(false);
-    setIsCompleted(false);
-    setIsFadingOut(false);
-    setShowEndScreen(false);
-    setCycleCount(0);
-    setElapsedTime(0);
-    setPhaseIndex(0);
+  // Priorité 2: Callbacks avec functional setState
+  const startBreathing = useCallback(() => {
     lastCycleRef.current = -1;
     startTimeRef.current = performance.now();
     pausedAtRef.current = null;
     totalPausedRef.current = 0;
-    setPhase('inhale');
-    setCircleRadius(30);
-    setCircleOpacity(0.15);
-  };
+    animationDataRef.current = {
+      phase: 'inhale',
+      phaseIndex: 0,
+      circleRadius: MIN_RADIUS,
+      circleOpacity: 0.15,
+      cycleCount: 0,
+      elapsedTime: 0,
+      phaseProgress: 0
+    };
+    setAppState('breathing');
+  }, []);
 
-  const restartBreathing = () => {
-    startBreathing();
-  };
-
-  const pauseBreathing = () => {
-    if (!isPaused) {
-      pausedAtRef.current = performance.now();
-    } else {
-      if (pausedAtRef.current) {
-        totalPausedRef.current += performance.now() - pausedAtRef.current;
+  const pauseBreathing = useCallback(() => {
+    setAppState(prev => {
+      if (prev === 'breathing') {
+        pausedAtRef.current = performance.now();
+        return 'paused';
+      } else if (prev === 'paused') {
+        if (pausedAtRef.current) {
+          totalPausedRef.current += performance.now() - pausedAtRef.current;
+        }
+        pausedAtRef.current = null;
+        return 'breathing';
       }
-      pausedAtRef.current = null;
-    }
-    setIsPaused(!isPaused);
-  };
+      return prev;
+    });
+  }, []);
 
-  const resetBreathing = () => {
-    setIsStarted(false);
-    setIsPaused(false);
-    setIsCompleted(false);
-    setIsFadingOut(false);
-    setShowEndScreen(false);
-    setPhase('idle');
-    setPhaseIndex(0);
-    setCircleRadius(30);
-    setCircleOpacity(0.15);
-    setCycleCount(0);
-    setElapsedTime(0);
-    lastCycleRef.current = -1;
+  const resetBreathing = useCallback(() => {
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
     }
     if (fadeTimeoutRef.current) {
       clearTimeout(fadeTimeoutRef.current);
     }
-  };
+    lastCycleRef.current = -1;
+    animationDataRef.current = {
+      phase: 'idle',
+      phaseIndex: 0,
+      circleRadius: MIN_RADIUS,
+      circleOpacity: 0.15,
+      cycleCount: 0,
+      elapsedTime: 0,
+      phaseProgress: 0
+    };
+    setAppState('idle');
+  }, []);
 
-  // Animation principale
+  // Animation principale optimisée
   useEffect(() => {
-    if (!isStarted || isPaused || isCompleted) {
+    if (appState !== 'breathing') {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
@@ -162,27 +210,19 @@ const App = () => {
 
     const animate = (now) => {
       const totalElapsed = now - startTimeRef.current - totalPausedRef.current;
+      const cyclePosition = totalElapsed % cycleTime;
+      const exhaleEnd = timings.inhale + timings.hold1 + timings.exhale;
+      const isAtExhaleEnd = cyclePosition >= exhaleEnd - 100 && cyclePosition <= exhaleEnd + 100;
       
-      setElapsedTime(totalElapsed);
-
-      if (totalElapsed >= duration * 1000) {
+      // Terminer sur expiration
+      if (totalElapsed >= duration * 1000 && isAtExhaleEnd) {
         playChime();
-        setIsCompleted(true);
-        setIsFadingOut(true);
-        
+        setAppState('fadingOut');
         fadeTimeoutRef.current = setTimeout(() => {
-          setShowEndScreen(true);
+          setAppState('endScreen');
         }, 10000);
         return;
       }
-
-      const cyclePosition = totalElapsed % cycleTime;
-      
-      const easeInOut = (t) => {
-        return t < 0.5
-          ? 2 * t * t
-          : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      };
 
       let currentPhase;
       let currentPhaseIndex;
@@ -211,33 +251,30 @@ const App = () => {
         sizeProgress = 0;
       }
 
-      const currentCycleNumber = Math.floor(totalElapsed / cycleTime);
-      if (currentCycleNumber > lastCycleRef.current) {
-        lastCycleRef.current = currentCycleNumber;
-        setCycleCount(currentCycleNumber + 1);
-      }
-
-      setPhase(currentPhase);
-      setPhaseIndex(currentPhaseIndex);
-      setPhaseProgress(linearProgress);
-
-      const minRadius = 30;
-      const maxRadius = 120;
-      const minArea = minRadius * minRadius;
-      const maxArea = maxRadius * maxRadius;
-      const currentArea = minArea + sizeProgress * (maxArea - minArea);
+      // Calcul du rayon basé sur l'aire
+      const currentArea = MIN_AREA + sizeProgress * (MAX_AREA - MIN_AREA);
       const radius = Math.sqrt(currentArea);
 
-      const baseOpacity = 0.25 + sizeProgress * 0.35;
-      
-      let opacity = baseOpacity;
+      // Calcul de l'opacité
+      let opacity = 0.25 + sizeProgress * 0.35;
       if (currentPhase === 'hold1' || currentPhase === 'hold2') {
-        const pulsePhase = (linearProgress * Math.PI * 2);
+        const pulsePhase = linearProgress * Math.PI * 2;
         opacity += Math.sin(pulsePhase) * 0.08;
       }
 
-      setCircleRadius(radius);
-      setCircleOpacity(Math.max(0.2, Math.min(0.65, opacity)));
+      // Mise à jour du ref (pas de re-render)
+      animationDataRef.current = {
+        phase: currentPhase,
+        phaseIndex: currentPhaseIndex,
+        circleRadius: radius,
+        circleOpacity: Math.max(0.2, Math.min(0.65, opacity)),
+        cycleCount: Math.floor(totalElapsed / cycleTime) + 1,
+        elapsedTime: totalElapsed,
+        phaseProgress: linearProgress
+      };
+
+      // Force un seul re-render par frame
+      forceRender(n => n + 1);
 
       animationRef.current = requestAnimationFrame(animate);
     };
@@ -249,31 +286,44 @@ const App = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isStarted, isPaused, isCompleted, duration, timings, cycleTime]);
+  }, [appState, duration, timings, cycleTime, playChime]);
 
-  // Animation idle (désactivée si prefers-reduced-motion)
+  // Animation idle
   const [idlePulse, setIdlePulse] = useState(0);
   useEffect(() => {
-    if (phase === 'idle' && !isCompleted && !isStarted && !prefersReducedMotion) {
+    if (appState === 'idle' && !prefersReducedMotion) {
       const interval = setInterval(() => {
-        setIdlePulse(p => (p + 0.012) % (Math.PI * 2)); // Plus lent et fluide
+        setIdlePulse(p => (p + 0.012) % (Math.PI * 2));
       }, 50);
       return () => clearInterval(interval);
     }
-  }, [phase, isCompleted, isStarted, prefersReducedMotion]);
+  }, [appState, prefersReducedMotion]);
 
+  // Animation shimmer bouton
   const [buttonShimmer, setButtonShimmer] = useState(0);
   useEffect(() => {
-    if (!isStarted && !isCompleted && !prefersReducedMotion) {
+    if (appState === 'idle' && !prefersReducedMotion) {
       const interval = setInterval(() => {
         setButtonShimmer(s => (s + 1) % 100);
       }, 50);
       return () => clearInterval(interval);
     }
-  }, [isStarted, isCompleted, prefersReducedMotion]);
+  }, [appState, prefersReducedMotion]);
 
+  // Animation étoiles
+  const [starTime, setStarTime] = useState(0);
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+    const interval = setInterval(() => {
+      setStarTime(t => t + 50);
+    }, 50);
+    return () => clearInterval(interval);
+  }, [prefersReducedMotion]);
+
+  // Getters dérivés
   const getPhaseText = () => {
-    if (phase === 'idle') return isCompleted ? '' : 'Ready';
+    const phase = animationDataRef.current.phase;
+    if (phase === 'idle') return appState === 'endScreen' ? '' : 'Ready';
     if (phase === 'inhale') return 'Inhale';
     if (phase === 'exhale') return 'Exhale';
     if (phase === 'hold1' || phase === 'hold2') {
@@ -284,14 +334,12 @@ const App = () => {
   };
 
   const getIdleCircleProps = () => {
-    if (isCompleted) {
+    if (appState === 'endScreen') {
       return { radius: 30, opacity: 0 };
     }
-    // Si prefers-reduced-motion, pas de pulsation
     if (prefersReducedMotion) {
       return { radius: 55, opacity: 0.65 };
     }
-    // Animation plus fluide avec courbe sinusoïdale douce
     const pulse = 0.5 + Math.sin(idlePulse) * 0.12;
     return {
       radius: 30 + pulse * 50,
@@ -303,10 +351,11 @@ const App = () => {
   const renderPearls = () => {
     const elements = [];
     const radius = 160;
-    const totalPearls = totalCycles * phasesPerCycle;
+    const totalPearls = totalCycles * PHASES_PER_CYCLE;
+    const { elapsedTime, phaseIndex, phaseProgress } = animationDataRef.current;
     
     const currentCycle = Math.floor(elapsedTime / cycleTime);
-    const activePearlIndex = currentCycle * phasesPerCycle + phaseIndex;
+    const activePearlIndex = currentCycle * PHASES_PER_CYCLE + phaseIndex;
     const completedPearls = activePearlIndex;
     
     const isLongExhale = technique === 'longExhale';
@@ -321,12 +370,7 @@ const App = () => {
       const isHold = phaseType === 1 || phaseType === 3;
       const isMainPhase = phaseType === 0 || phaseType === 2;
       
-      let baseSize;
-      if (isMainPhase) {
-        baseSize = 8;
-      } else {
-        baseSize = isLongExhale ? 1 : 5;
-      }
+      let baseSize = isMainPhase ? 8 : (isLongExhale ? 1 : 5);
       
       const isCompletedPearl = i < completedPearls;
       const isActive = i === activePearlIndex;
@@ -357,7 +401,7 @@ const App = () => {
       
       elements.push(
         <circle
-          key={`pearl-${i}`}
+          key={i}
           cx={x}
           cy={y}
           r={currentSize}
@@ -370,124 +414,78 @@ const App = () => {
     return elements;
   };
 
-  // Génération des étoiles
-  const [stars] = useState(() => {
-    const starArray = [];
+  // Composant Background
+  const BackgroundEffects = () => {
+    const { circleRadius, circleOpacity } = animationDataRef.current;
     
-    for (let i = 0; i < 110; i++) {
-      starArray.push({
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: Math.random() * 1 + 0.5,
-        opacity: Math.random() * 0.3 + 0.1,
-        twinkle: false,
-        layer: 'far'
-      });
-    }
-    
-    for (let i = 0; i < 40; i++) {
-      starArray.push({
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: Math.random() * 2 + 1.5,
-        baseOpacity: Math.random() * 0.4 + 0.3,
-        twinkle: true,
-        twinkleSpeed: Math.random() * 4000 + 3000,
-        twinkleOffset: Math.random() * Math.PI * 2,
-        layer: 'near'
-      });
-    }
-    
-    return starArray;
-  });
-
-  // Animation des étoiles (désactivée si prefers-reduced-motion)
-  const [starTime, setStarTime] = useState(0);
-  useEffect(() => {
-    if (prefersReducedMotion) return;
-    
-    const interval = setInterval(() => {
-      setStarTime(t => t + 50);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [prefersReducedMotion]);
-
-  // Background avec ciel étoilé et halo
-  const BackgroundEffects = () => (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      <div 
-        className="absolute inset-0"
-        style={{
-          background: `radial-gradient(ellipse at 50% 50%, 
-            rgba(30, 41, 59, 1) 0%, 
-            rgba(15, 23, 42, 1) 100%)`
-        }}
-      />
-      
-      {/* Étoiles (fixes si prefers-reduced-motion) */}
-      {stars.map((star, idx) => {
-        let opacity = star.opacity;
+    return (
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div 
+          className="absolute inset-0"
+          style={{
+            background: `radial-gradient(ellipse at 50% 50%, 
+              rgba(30, 41, 59, 1) 0%, 
+              rgba(15, 23, 42, 1) 100%)`
+          }}
+        />
         
-        if (star.twinkle && !prefersReducedMotion) {
-          const phase = ((starTime / star.twinkleSpeed) * Math.PI * 2) + star.twinkleOffset;
-          opacity = star.baseOpacity + Math.sin(phase) * 0.25;
-        } else if (star.twinkle) {
-          opacity = star.baseOpacity;
-        }
+        {STARS.map((star, idx) => {
+          let opacity = star.opacity;
+          
+          if (star.twinkle && !prefersReducedMotion) {
+            const phase = ((starTime / star.twinkleSpeed) * Math.PI * 2) + star.twinkleOffset;
+            opacity = star.baseOpacity + Math.sin(phase) * 0.25;
+          } else if (star.twinkle) {
+            opacity = star.baseOpacity;
+          }
+          
+          return (
+            <div
+              key={idx}
+              className="absolute rounded-full"
+              style={{
+                left: `${star.x}%`,
+                top: `${star.y}%`,
+                width: `${star.size}px`,
+                height: `${star.size}px`,
+                backgroundColor: star.layer === 'far' ? '#fcd9b8' : '#fdba74',
+                opacity: opacity,
+                boxShadow: star.twinkle && !prefersReducedMotion ? `0 0 ${star.size * 2}px rgba(251, 146, 60, ${opacity * 0.5})` : 'none'
+              }}
+            />
+          );
+        })}
         
-        return (
-          <div
-            key={idx}
-            className="absolute rounded-full"
-            style={{
-              left: `${star.x}%`,
-              top: `${star.y}%`,
-              width: `${star.size}px`,
-              height: `${star.size}px`,
-              backgroundColor: star.layer === 'far' ? '#fcd9b8' : '#fdba74',
-              opacity: opacity,
-              boxShadow: star.twinkle && !prefersReducedMotion ? `0 0 ${star.size * 2}px rgba(251, 146, 60, ${opacity * 0.5})` : 'none'
-            }}
-          />
-        );
-      })}
-      
-      {/* Halos (désactivés si prefers-reduced-motion) */}
-      {isStarted && !showEndScreen && !prefersReducedMotion && (
-        <>
-          <div 
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-            style={{
-              width: `${circleRadius * 4}px`,
-              height: `${circleRadius * 4}px`,
-              background: `radial-gradient(circle, 
-                rgba(251, 146, 60, ${circleOpacity * 0.08}) 0%, 
-                rgba(251, 146, 60, 0) 70%)`,
-            }}
-          />
-          <div 
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-            style={{
-              width: `${circleRadius * 2.2}px`,
-              height: `${circleRadius * 2.2}px`,
-              background: `radial-gradient(circle, 
-                rgba(251, 146, 60, ${circleOpacity * 0.15}) 0%, 
-                rgba(251, 146, 60, 0) 80%)`,
-            }}
-          />
-        </>
-      )}
-      
-      {!isStarted && !showEndScreen && !prefersReducedMotion && (
-        <></>
-      )}
-    </div>
-  );
+        {(appState === 'breathing' || appState === 'paused') && !prefersReducedMotion && (
+          <>
+            <div 
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                width: `${circleRadius * 4}px`,
+                height: `${circleRadius * 4}px`,
+                background: `radial-gradient(circle, 
+                  rgba(251, 146, 60, ${circleOpacity * 0.08}) 0%, 
+                  rgba(251, 146, 60, 0) 70%)`,
+              }}
+            />
+            <div 
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                width: `${circleRadius * 2.2}px`,
+                height: `${circleRadius * 2.2}px`,
+                background: `radial-gradient(circle, 
+                  rgba(251, 146, 60, ${circleOpacity * 0.15}) 0%, 
+                  rgba(251, 146, 60, 0) 80%)`,
+              }}
+            />
+          </>
+        )}
+      </div>
+    );
+  };
 
-  // Styles pour le focus visible
-  const focusStyles = "focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
-
-  if (showEndScreen) {
+  // Rendu conditionnel basé sur appState
+  if (appState === 'endScreen') {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 relative">
         <BackgroundEffects />
@@ -503,16 +501,16 @@ const App = () => {
             <button
               onClick={resetBreathing}
               aria-label="Go back to home screen"
-              className={`bg-slate-800/50 text-orange-400/70 px-6 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all border border-slate-700/30 flex items-center gap-2 hover:scale-105 hover:bg-slate-800/70 hover:text-orange-400 ${focusStyles}`}
+              className={`bg-slate-800/50 text-orange-400/70 px-6 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all border border-slate-700/30 flex items-center gap-2 hover:scale-105 hover:bg-slate-800/70 hover:text-orange-400 ${FOCUS_STYLES}`}
             >
               <Home size={20} aria-hidden="true" />
               Back
             </button>
             
             <button
-              onClick={restartBreathing}
+              onClick={startBreathing}
               aria-label="Restart breathing session"
-              className={`bg-orange-500/80 text-white px-6 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all flex items-center gap-2 hover:scale-105 hover:bg-orange-500 ${focusStyles}`}
+              className={`bg-orange-500/80 text-white px-6 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all flex items-center gap-2 hover:scale-105 hover:bg-orange-500 ${FOCUS_STYLES}`}
             >
               <RefreshCw size={20} aria-hidden="true" />
               Restart
@@ -523,7 +521,7 @@ const App = () => {
     );
   }
 
-  if (!isStarted) {
+  if (appState === 'idle') {
     const idleCircle = getIdleCircleProps();
     return (
       <div className="min-h-screen bg-slate-900 relative overflow-y-auto">
@@ -531,9 +529,8 @@ const App = () => {
         
         <div className="min-h-screen flex flex-col lg:flex-row items-center justify-center p-4 lg:px-16 xl:px-24 gap-12 lg:gap-12 relative z-10">
           
-          {/* Cercle cliquable - accessible au clavier */}
           <button 
-            className={`w-full lg:flex-1 flex items-center justify-center min-h-[45vh] lg:min-h-0 cursor-pointer bg-transparent border-none ${focusStyles}`}
+            className={`w-full lg:flex-1 flex items-center justify-center min-h-[45vh] lg:min-h-0 cursor-pointer bg-transparent border-none ${FOCUS_STYLES}`}
             onClick={startBreathing}
             aria-label="Start breathing session"
           >
@@ -544,7 +541,6 @@ const App = () => {
               aria-label="Breathing circle animation"
               style={{ overflow: 'visible' }}
             >
-              {/* Halo externe - suit le cercle */}
               {!prefersReducedMotion && (
                 <circle
                   cx="175"
@@ -553,14 +549,12 @@ const App = () => {
                   fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.12})`}
                 />
               )}
-              {/* Halo moyen */}
               <circle
                 cx="175"
                 cy="175"
                 r={idleCircle.radius * 1.2}
                 fill={`rgba(251, 146, 60, ${idleCircle.opacity * 0.18})`}
               />
-              {/* Cercle guide */}
               <circle
                 cx="175"
                 cy="175"
@@ -570,7 +564,6 @@ const App = () => {
                 strokeWidth="1"
                 opacity="0.2"
               />
-              {/* Cercle principal */}
               <circle
                 cx="175"
                 cy="175"
@@ -595,7 +588,7 @@ const App = () => {
                   <button
                     onClick={() => setTechnique('balanced')}
                     aria-pressed={technique === 'balanced'}
-                    className={`py-3 px-4 rounded-xl transition-all text-sm ${focusStyles} ${
+                    className={`py-3 px-4 rounded-xl transition-all text-sm ${FOCUS_STYLES} ${
                       technique === 'balanced'
                         ? 'bg-orange-500/80 text-white shadow-lg'
                         : 'bg-slate-800/50 text-orange-300/70 hover:bg-slate-700/60 border border-slate-700/30'
@@ -607,7 +600,7 @@ const App = () => {
                   <button
                     onClick={() => setTechnique('longExhale')}
                     aria-pressed={technique === 'longExhale'}
-                    className={`py-3 px-4 rounded-xl transition-all text-sm ${focusStyles} ${
+                    className={`py-3 px-4 rounded-xl transition-all text-sm ${FOCUS_STYLES} ${
                       technique === 'longExhale'
                         ? 'bg-orange-500/80 text-white shadow-lg'
                         : 'bg-slate-800/50 text-orange-300/70 hover:bg-slate-700/60 border border-slate-700/30'
@@ -638,7 +631,7 @@ const App = () => {
                   aria-valuemax={5}
                   aria-valuenow={duration / 60}
                   aria-valuetext={`${duration / 60} minutes`}
-                  className={`w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 ${focusStyles}`}
+                  className={`w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 ${FOCUS_STYLES}`}
                 />
                 <div className="flex justify-between text-xs text-orange-300 opacity-50 mt-2">
                   <span>1 min</span>
@@ -649,7 +642,7 @@ const App = () => {
               <button
                 onClick={startBreathing}
                 aria-label="Start breathing session"
-                className={`w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 rounded-xl font-medium text-lg shadow-lg hover:shadow-xl hover:scale-105 transition-all relative overflow-hidden ${focusStyles}`}
+                className={`w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 rounded-xl font-medium text-lg shadow-lg hover:shadow-xl hover:scale-105 transition-all relative overflow-hidden ${FOCUS_STYLES}`}
                 style={prefersReducedMotion ? {} : {
                   background: `linear-gradient(90deg, 
                     #f97316 0%, 
@@ -666,11 +659,15 @@ const App = () => {
     );
   }
 
+  // États breathing, paused, fadingOut
+  const { circleRadius, circleOpacity } = animationDataRef.current;
+  const isPaused = appState === 'paused';
+  const isFadingOut = appState === 'fadingOut';
+
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 relative">
       <BackgroundEffects />
       
-      {/* Annonce vocale pour les lecteurs d'écran */}
       <div 
         role="status" 
         aria-live="polite" 
@@ -680,8 +677,8 @@ const App = () => {
         {getPhaseText()}
       </div>
       
-      <div className="text-center mb-8 relative z-10">
-        <h2 className="text-3xl font-light text-orange-400 mb-2" aria-hidden="true">
+      <div className="text-center mb-8 relative z-10 h-12 flex items-center justify-center">
+        <h2 className="text-3xl font-light text-orange-400" aria-hidden="true">
           {getPhaseText()}
         </h2>
       </div>
@@ -728,14 +725,14 @@ const App = () => {
         <button
           onClick={pauseBreathing}
           aria-label={isPaused ? "Resume breathing" : "Pause breathing"}
-          className={`bg-slate-800/50 text-orange-400/80 p-3 rounded-full shadow-lg hover:shadow-xl transition-all border border-slate-700/30 hover:scale-105 hover:bg-slate-800/80 hover:text-orange-400 ${focusStyles}`}
+          className={`bg-slate-800/50 text-orange-400/80 p-3 rounded-full shadow-lg hover:shadow-xl transition-all border border-slate-700/30 hover:scale-105 hover:bg-slate-800/80 hover:text-orange-400 ${FOCUS_STYLES}`}
         >
           {isPaused ? <Play size={20} aria-hidden="true" /> : <Pause size={20} aria-hidden="true" />}
         </button>
         <button
           onClick={resetBreathing}
           aria-label="Stop and return to home"
-          className={`bg-slate-800/50 text-orange-400/80 p-3 rounded-full shadow-lg hover:shadow-xl transition-all border border-slate-700/30 hover:scale-105 hover:bg-slate-800/80 hover:text-orange-400 ${focusStyles}`}
+          className={`bg-slate-800/50 text-orange-400/80 p-3 rounded-full shadow-lg hover:shadow-xl transition-all border border-slate-700/30 hover:scale-105 hover:bg-slate-800/80 hover:text-orange-400 ${FOCUS_STYLES}`}
         >
           <RotateCcw size={20} aria-hidden="true" />
         </button>

@@ -326,9 +326,13 @@ const App = () => {
     if (phase === 'idle') return appState === 'endScreen' ? '' : 'Ready';
     if (phase === 'inhale') return 'Inhale';
     if (phase === 'exhale') return 'Exhale';
-    if (phase === 'hold1' || phase === 'hold2') {
-      if (technique === 'longExhale') return '';
-      return 'Hold';
+    if (phase === 'hold1') {
+      // Après inhale : en mode longExhale, garder "Inhale", sinon "Hold"
+      return technique === 'longExhale' ? 'Inhale' : 'Hold';
+    }
+    if (phase === 'hold2') {
+      // Après exhale : en mode longExhale, garder "Exhale", sinon "Hold"
+      return technique === 'longExhale' ? 'Exhale' : 'Hold';
     }
     return '';
   };
